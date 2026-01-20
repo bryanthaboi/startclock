@@ -56,6 +56,6 @@ Then run:
 ```
 
 Notes:
+
 - The `date`, `hours`, and `note` args are **Notion property names** in your database.
 - The app stores and uses **Notion property IDs** internally (stable if you rename properties).
-
