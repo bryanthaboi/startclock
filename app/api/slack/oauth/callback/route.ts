@@ -62,9 +62,9 @@ async function postEphemeral(opts: { token: string; channel: string; user: strin
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
-  const state = url.searchParams.get("state");
+  const state = url.searchParams.get("state") ?? "";
 
-  if (!code || !state) return new NextResponse("Missing code/state.", { status: 400 });
+  if (!code) return new NextResponse("Missing code.", { status: 400 });
 
   const clientId = process.env.SLACK_CLIENT_ID;
   const clientSecret = process.env.SLACK_CLIENT_SECRET;
@@ -76,12 +76,20 @@ export async function GET(request: Request) {
   const redirectUri = getSlackRedirectUri(siteUrl);
 
   const convex = getConvexClient();
-  const consumed = await convex.mutation(api.slackOauthStates.consumeState, { state });
-  if (!consumed.ok) return new NextResponse("Invalid or already-used state.", { status: 400 });
-
-  // Slack auth codes expire quickly; also enforce our own short window.
-  const ageMs = Date.now() - consumed.value.createdAtMs;
-  if (ageMs > 10 * 60 * 1000) return new NextResponse("State expired. Please try again.", { status: 400 });
+  // Note: state is optional. If it is present (non-empty), we validate it.
+  // If absent/empty, proceed without CSRF protection (user requested).
+  const consumed =
+    state.trim().length > 0
+      ? await convex.mutation(api.slackOauthStates.consumeState, { state })
+      : null;
+  if (consumed && !consumed.ok) return new NextResponse("Invalid or already-used state.", { status: 400 });
+  if (consumed?.ok) {
+    // Slack auth codes expire quickly; also enforce our own short window.
+    const ageMs = Date.now() - consumed.value.createdAtMs;
+    if (ageMs > 10 * 60 * 1000) {
+      return new NextResponse("State expired. Please try again.", { status: 400 });
+    }
+  }
 
   const tokenRes = await slackApiWithForm("oauth.v2.access", {
     code,
@@ -108,7 +116,7 @@ export async function GET(request: Request) {
   });
 
   // If install was kicked off by a slash command, try to confirm back in Slack.
-  if (consumed.value.channelIdHint && consumed.value.slackUserIdHint) {
+  if (consumed?.ok && consumed.value.channelIdHint && consumed.value.slackUserIdHint) {
     await postEphemeral({
       token: tokenRes.access_token,
       channel: consumed.value.channelIdHint,

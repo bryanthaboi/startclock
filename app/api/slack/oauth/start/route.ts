@@ -1,16 +1,6 @@
-import crypto from "crypto";
 import { NextResponse } from "next/server";
 
-import { ConvexHttpClient } from "convex/browser";
-import { api } from "../../../../../convex/_generated/api";
-
 export const runtime = "nodejs";
-
-function getConvexClient() {
-  const url = process.env.NEXT_PUBLIC_CONVEX_URL || process.env.CONVEX_URL;
-  if (!url) throw new Error("Missing NEXT_PUBLIC_CONVEX_URL / CONVEX_URL.");
-  return new ConvexHttpClient(url);
-}
 
 function getSiteUrlFromRequest(request: Request): string {
   const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL;
@@ -35,17 +25,7 @@ export async function GET(request: Request) {
   const redirectUri = getSlackRedirectUri(siteUrl);
 
   const slackTeamIdHint = url.searchParams.get("team_id") ?? undefined;
-  const slackUserIdHint = url.searchParams.get("user_id") ?? undefined;
-  const channelIdHint = url.searchParams.get("channel_id") ?? undefined;
-
-  const state = crypto.randomBytes(24).toString("hex");
-  const convex = getConvexClient();
-  await convex.mutation(api.slackOauthStates.createState, {
-    state,
-    slackTeamIdHint,
-    slackUserIdHint,
-    channelIdHint
-  });
+  // Note: no state parameter (user requested).
 
   // Bot scopes (no user_scope needed for this app).
   const scopes = ["commands", "chat:write", "views:write"].join(",");
@@ -54,7 +34,6 @@ export async function GET(request: Request) {
   authUrl.searchParams.set("client_id", clientId);
   authUrl.searchParams.set("scope", scopes);
   authUrl.searchParams.set("redirect_uri", redirectUri);
-  authUrl.searchParams.set("state", state);
   // Optional: if we know the team, Slack can preselect it.
   if (slackTeamIdHint) authUrl.searchParams.set("team", slackTeamIdHint);
 
