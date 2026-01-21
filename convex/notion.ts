@@ -12,6 +12,14 @@ type NotionDatabase = {
   >;
 };
 
+type NotionSearchResponse = {
+  results: Array<{
+    object: string;
+    id: string;
+    title?: Array<{ plain_text?: string }>;
+  }>;
+};
+
 async function notionFetch(token: string, path: string, init?: RequestInit): Promise<Response> {
   return await fetch(`https://api.notion.com/v1${path}`, {
     ...init,
@@ -22,6 +30,13 @@ async function notionFetch(token: string, path: string, init?: RequestInit): Pro
       ...(init?.headers ?? {})
     }
   });
+}
+
+function getNotionTokenFromConfig(config: {
+  notionAccessToken?: string;
+  notionToken?: string;
+}): string | undefined {
+  return config.notionAccessToken ?? config.notionToken;
 }
 
 function requirePropertyId(db: NotionDatabase, name: string, expectedType?: string): string {
@@ -121,7 +136,16 @@ export const writeNotionEntryAndStopTimer = action({
     url: string | null;
   }> => {
     const config = await ctx.runQuery(api.userConfig.getUserConfig, args);
-    if (!config) throw new Error("No Notion config. Run /notionsetup first.");
+    if (!config) throw new Error("No Notion config. Run setup first.");
+    if ((config.mode ?? "notion") !== "notion") {
+      throw new Error("User is not configured for Notion mode.");
+    }
+    const notionToken = getNotionTokenFromConfig(config);
+    if (!notionToken) throw new Error("Missing Notion access token.");
+    if (!config.notionDatabaseId) throw new Error("Missing Notion database.");
+    if (!config.datePropertyId || !config.hoursPropertyId) {
+      throw new Error("Missing Notion property mappings.");
+    }
 
     const timer = await ctx.runQuery(api.timers.getActiveTimer, args);
     if (!timer) throw new Error("No active timer.");
@@ -152,7 +176,7 @@ export const writeNotionEntryAndStopTimer = action({
       };
     }
 
-    const createRes = await notionFetch(config.notionToken, "/pages", {
+    const createRes = await notionFetch(notionToken, "/pages", {
       method: "POST",
       body: JSON.stringify({
         parent: { database_id: config.notionDatabaseId },
@@ -175,6 +199,73 @@ export const writeNotionEntryAndStopTimer = action({
       hours,
       url: created.url ?? null
     };
+  }
+});
+
+export const listDatabasesForSetupSession = action({
+  args: { sessionId: v.id("setupSessions") },
+  handler: async (ctx, args): Promise<{ ok: true; databases: Array<{ id: string; title: string }> }> => {
+    const session = await ctx.runQuery(api.setupSessions.getSetupSession, { id: args.sessionId });
+    if (!session) throw new Error("Setup session not found.");
+    if (!session.notionAccessToken) throw new Error("Notion not connected yet.");
+
+    const searchRes = await notionFetch(session.notionAccessToken, "/search", {
+      method: "POST",
+      body: JSON.stringify({
+        query: "",
+        filter: { property: "object", value: "database" },
+        page_size: 100
+      })
+    });
+    if (!searchRes.ok) {
+      const body = await searchRes.text().catch(() => "");
+      throw new Error(`Notion search failed (HTTP ${searchRes.status}). ${body}`.trim());
+    }
+
+    const json = (await searchRes.json()) as NotionSearchResponse;
+    const databases = (json.results ?? [])
+      .filter((r) => r.object === "database")
+      .map((r) => {
+        const title = (r.title ?? []).map((t) => t.plain_text ?? "").join("").trim();
+        return { id: r.id, title: title || r.id };
+      })
+      .sort((a, b) => a.title.localeCompare(b.title));
+
+    return { ok: true as const, databases };
+  }
+});
+
+export const getDatabasePropertiesForSetupSession = action({
+  args: { sessionId: v.id("setupSessions"), databaseId: v.string() },
+  handler: async (
+    ctx,
+    args
+  ): Promise<{
+    ok: true;
+    properties: Array<{ name: string; id: string; type: string }>;
+    titlePropertyId?: string;
+  }> => {
+    const session = await ctx.runQuery(api.setupSessions.getSetupSession, { id: args.sessionId });
+    if (!session) throw new Error("Setup session not found.");
+    if (!session.notionAccessToken) throw new Error("Notion not connected yet.");
+
+    const dbRes = await notionFetch(session.notionAccessToken, `/databases/${args.databaseId}`, {
+      method: "GET"
+    });
+    if (!dbRes.ok) {
+      const body = await dbRes.text().catch(() => "");
+      throw new Error(`Failed to fetch Notion database (HTTP ${dbRes.status}). ${body}`.trim());
+    }
+    const db = (await dbRes.json()) as NotionDatabase;
+
+    const properties = Object.entries(db.properties).map(([name, prop]) => ({
+      name,
+      id: prop.id,
+      type: prop.type
+    }));
+
+    const titlePropertyId = findTitlePropertyId(db);
+    return { ok: true as const, properties, titlePropertyId };
   }
 });
 

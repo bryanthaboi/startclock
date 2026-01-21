@@ -4,6 +4,7 @@ import { ConvexHttpClient } from "convex/browser";
 
 import { api } from "../../../../convex/_generated/api";
 import { parseKeyValueArgs } from "../../../../lib/parseArgs";
+import { slackApi } from "../../../../lib/slackApi";
 import { verifySlackRequest } from "../../../../lib/slackVerify";
 import { formatUtcIso, roundUpMinutesToHalfHour, utcDateFromMs } from "../../../../lib/time";
 
@@ -39,6 +40,73 @@ function httpText(text: string, status = 200) {
   });
 }
 
+function getSiteUrlFromRequest(request: Request): string {
+  const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL;
+  if (env) return env.replace(/\/+$/, "");
+  const url = new URL(request.url);
+  return `${url.protocol}//${url.host}`;
+}
+
+function buildSetupModal(opts: {
+  siteUrl: string;
+  sessionId: string;
+  slackTeamId: string;
+  slackUserId: string;
+  channelId?: string;
+}) {
+  const private_metadata = JSON.stringify({
+    step: "connect",
+    sessionId: opts.sessionId,
+    slackTeamId: opts.slackTeamId,
+    slackUserId: opts.slackUserId,
+    channelId: opts.channelId ?? null
+  });
+
+  const connectUrl = new URL("/api/notion/oauth/start", opts.siteUrl);
+  connectUrl.searchParams.set("state", opts.sessionId);
+
+  return {
+    type: "modal",
+    callback_id: "startclock_setup",
+    title: { type: "plain_text", text: "Startclock setup" },
+    submit: { type: "plain_text", text: "Continue" },
+    close: { type: "plain_text", text: "Close" },
+    private_metadata,
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text:
+            "*Step 1 — Connect Notion*\n\nClick *Connect Notion* to authorize access, then come back here and click *Continue*."
+        }
+      },
+      {
+        type: "actions",
+        block_id: "connect_block",
+        elements: [
+          {
+            type: "button",
+            action_id: "connect_notion",
+            text: { type: "plain_text", text: "Connect Notion" },
+            url: connectUrl.toString()
+          }
+        ]
+      },
+      {
+        type: "context",
+        elements: [
+          {
+            type: "mrkdwn",
+            text:
+              "Prefer not to use Notion? You can switch to *Manual mode* in the last step and copy/paste your time entry."
+          }
+        ]
+      }
+    ]
+  };
+}
+
 export async function POST(request: Request) {
   const rawBody = await request.text();
 
@@ -60,6 +128,7 @@ export async function POST(request: Request) {
   const slackTeamId = params.get("team_id") ?? "";
   const slackUserId = params.get("user_id") ?? "";
   const channelId = params.get("channel_id") ?? undefined;
+  const triggerId = params.get("trigger_id") ?? undefined;
 
   if (!command || !slackTeamId || !slackUserId) {
     return slackText("Invalid Slack command payload.", 400);
@@ -99,8 +168,25 @@ export async function POST(request: Request) {
     }
 
     if (command === "/startclock") {
-      const config = await convex.query(api.userConfig.getUserConfig, { slackTeamId, slackUserId });
-      if (!config) return slackText("Run /notionsetup first.");
+      if (text.trim().toLowerCase().startsWith("setup")) {
+        if (!triggerId) return slackText("Slack did not include trigger_id; cannot open modal.", 400);
+        const siteUrl = getSiteUrlFromRequest(request);
+        const session = await convex.mutation(api.setupSessions.createSetupSession, {
+          slackTeamId,
+          slackUserId
+        });
+        await slackApi("views.open", {
+          trigger_id: triggerId,
+          view: buildSetupModal({
+            siteUrl,
+            sessionId: session.id,
+            slackTeamId,
+            slackUserId,
+            channelId
+          })
+        });
+        return slackText("Opening setup…", 200);
+      }
 
       const existing = await convex.query(api.timers.getActiveTimer, { slackTeamId, slackUserId });
       if (existing) {
@@ -137,16 +223,32 @@ export async function POST(request: Request) {
       const { roundedMinutes, hours } = roundUpMinutesToHalfHour(elapsedMinutes);
       const dateStr = utcDateFromMs(timer.startedAtMs);
 
-      const res = await convex.action(api.notion.writeNotionEntryAndStopTimer, {
-        slackTeamId,
-        slackUserId
-      });
+      const status = await convex.query(api.userConfig.getUserConfigStatus, { slackTeamId, slackUserId });
+      if (status.mode === "notion" && status.hasNotionConfig) {
+        const res = await convex.action(api.notion.writeNotionEntryAndStopTimer, {
+          slackTeamId,
+          slackUserId
+        });
 
-      const link = res.url ? `\nNotion: ${res.url}` : "";
+        const link = res.url ? `\nNotion: ${res.url}` : "";
+        return slackText(
+          `Stopped.\nStart: ${formatUtcIso(timer.startedAtMs)} (UTC date ${dateStr})\nRaw: ${minutesToHhMm(
+            elapsedMinutes
+          )}\nRounded: ${minutesToHoursText(roundedMinutes)} (${hours.toFixed(1)} hours)\n${link}`.trim()
+        );
+      }
+
+      // Manual/no-Notion path: stop timer and provide copy/paste summary.
+      await convex.mutation(api.timers.deleteTimer, { slackTeamId, slackUserId });
+      const note = timer.note?.trim() ? `\nNote: ${timer.note?.trim()}` : "";
+      const setupHint =
+        status.mode === "notion"
+          ? "\n\nNotion isn’t configured yet. Run `/startclock setup` to connect and map your database."
+          : "";
       return slackText(
-        `Stopped.\nStart: ${formatUtcIso(timer.startedAtMs)} (UTC date ${dateStr})\nRaw: ${minutesToHhMm(
-          elapsedMinutes
-        )}\nRounded: ${minutesToHoursText(roundedMinutes)} (${hours.toFixed(1)} hours)\n${link}`.trim()
+        `Stopped (manual).\nDate: ${dateStr}\nHours: ${hours.toFixed(1)}\nRounded: ${minutesToHoursText(
+          roundedMinutes
+        )}${note}${setupHint}`.trim()
       );
     }
 

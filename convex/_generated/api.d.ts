@@ -10,6 +10,7 @@
 
 import type * as notion from "../notion.js";
 import type * as scheduler from "../scheduler.js";
+import type * as setupSessions from "../setupSessions.js";
 import type * as timers from "../timers.js";
 import type * as userConfig from "../userConfig.js";
 
@@ -22,6 +23,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   notion: typeof notion;
   scheduler: typeof scheduler;
+  setupSessions: typeof setupSessions;
   timers: typeof timers;
   userConfig: typeof userConfig;
 }>;
