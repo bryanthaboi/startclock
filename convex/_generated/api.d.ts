@@ -11,6 +11,8 @@
 import type * as notion from "../notion.js";
 import type * as scheduler from "../scheduler.js";
 import type * as setupSessions from "../setupSessions.js";
+import type * as slackInstallations from "../slackInstallations.js";
+import type * as slackOauthStates from "../slackOauthStates.js";
 import type * as timers from "../timers.js";
 import type * as userConfig from "../userConfig.js";
 
@@ -24,6 +26,8 @@ declare const fullApi: ApiFromModules<{
   notion: typeof notion;
   scheduler: typeof scheduler;
   setupSessions: typeof setupSessions;
+  slackInstallations: typeof slackInstallations;
+  slackOauthStates: typeof slackOauthStates;
   timers: typeof timers;
   userConfig: typeof userConfig;
 }>;

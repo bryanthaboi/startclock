@@ -2,6 +2,22 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  slackInstallations: defineTable({
+    slackTeamId: v.string(),
+    botAccessToken: v.string(),
+    botUserId: v.optional(v.string()),
+    installedAtMs: v.number()
+  }).index("by_team", ["slackTeamId"]),
+
+  slackOauthStates: defineTable({
+    state: v.string(),
+    createdAtMs: v.number(),
+    // Optional: if install was initiated from a slash command, we can ping user after install.
+    slackTeamIdHint: v.optional(v.string()),
+    slackUserIdHint: v.optional(v.string()),
+    channelIdHint: v.optional(v.string())
+  }).index("by_state", ["state"]),
+
   userConfig: defineTable({
     slackTeamId: v.string(),
     slackUserId: v.string(),

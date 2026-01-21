@@ -1,20 +1,11 @@
 type SlackApiOk<T> = T & { ok: true };
 type SlackApiError = { ok: false; error?: string };
 
-function requireSlackBotToken(): string {
-  const token = process.env.SLACK_BOT_TOKEN;
-  if (!token) {
-    throw new Error("Missing SLACK_BOT_TOKEN (required for Slack modals).");
-  }
-  return token;
-}
-
 export async function slackApi<TResponse extends Record<string, unknown>>(
+  token: string,
   method: string,
   body: Record<string, unknown>
 ): Promise<SlackApiOk<TResponse>> {
-  const token = requireSlackBotToken();
-
   const res = await fetch(`https://slack.com/api/${method}`, {
     method: "POST",
     headers: {

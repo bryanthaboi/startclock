@@ -15,7 +15,9 @@ Slack slash commands → Vercel (Next.js API route) → Convex (DB + logic + sch
 Set these in Vercel (and locally via `.env.local`).
 
 - `SLACK_SIGNING_SECRET`: Slack signing secret for request verification.
-- `SLACK_BOT_TOKEN`: Slack bot token (required for modals + ephemeral confirmation messages).
+- `SLACK_CLIENT_ID`: Slack OAuth client id (from your Slack app).
+- `SLACK_CLIENT_SECRET`: Slack OAuth client secret (from your Slack app).
+- `SLACK_REDIRECT_URI`: Slack OAuth redirect URI (optional if `NEXT_PUBLIC_SITE_URL` is set; defaults to `/api/slack/oauth/callback`).
 - `NEXT_PUBLIC_CONVEX_URL` (or `CONVEX_URL`): Convex deployment URL.
 - `NEXT_PUBLIC_SITE_URL` (or `SITE_URL`): Public base URL (used to build OAuth redirect URLs).
 - `NOTION_OAUTH_CLIENT_ID`: Notion OAuth client id.
@@ -45,6 +47,11 @@ npm run dev
 ```
 
 ## Slack setup
+
+First, install the app into your workspace (Slack OAuth):
+
+- Redirect URL: `https://startclock.vercel.app/api/slack/oauth/callback`
+- Install URL (Add to Slack): `https://startclock.vercel.app/api/slack/oauth/start`
 
 Create a Slack Slash Command for each command name and point all of them to:
 

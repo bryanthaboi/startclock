@@ -107,6 +107,19 @@ function buildSetupModal(opts: {
   };
 }
 
+function buildSlackInstallUrl(opts: {
+  siteUrl: string;
+  slackTeamId: string;
+  slackUserId: string;
+  channelId?: string;
+}) {
+  const u = new URL("/api/slack/oauth/start", opts.siteUrl);
+  u.searchParams.set("team_id", opts.slackTeamId);
+  u.searchParams.set("user_id", opts.slackUserId);
+  if (opts.channelId) u.searchParams.set("channel_id", opts.channelId);
+  return u.toString();
+}
+
 export async function POST(request: Request) {
   const rawBody = await request.text();
 
@@ -171,11 +184,27 @@ export async function POST(request: Request) {
       if (text.trim().toLowerCase().startsWith("setup")) {
         if (!triggerId) return slackText("Slack did not include trigger_id; cannot open modal.", 400);
         const siteUrl = getSiteUrlFromRequest(request);
+
+        const installation = await convex.query(api.slackInstallations.getInstallationByTeam, {
+          slackTeamId
+        });
+        if (!installation) {
+          const installUrl = buildSlackInstallUrl({
+            siteUrl,
+            slackTeamId,
+            slackUserId,
+            channelId
+          });
+          return slackText(
+            `Startclock isn’t installed in this workspace yet.\nInstall: ${installUrl}\nThen run /startclock setup again.`
+          );
+        }
+
         const session = await convex.mutation(api.setupSessions.createSetupSession, {
           slackTeamId,
           slackUserId
         });
-        await slackApi("views.open", {
+        await slackApi(installation.botAccessToken, "views.open", {
           trigger_id: triggerId,
           view: buildSetupModal({
             siteUrl,

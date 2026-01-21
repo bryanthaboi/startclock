@@ -341,6 +341,9 @@ export async function POST(request: Request) {
     if (!meta) return NextResponse.json({});
 
     const convex = getConvexClient();
+    const installation = await convex.query(api.slackInstallations.getInstallationByTeam, {
+      slackTeamId: meta.slackTeamId
+    });
 
     // Step 1: verify OAuth is connected; then move to DB selection.
     if (meta.step === "connect") {
@@ -434,8 +437,8 @@ export async function POST(request: Request) {
           mode: "manual"
         });
 
-        if (meta.channelId) {
-          await slackApi("chat.postEphemeral", {
+        if (meta.channelId && installation) {
+          await slackApi(installation.botAccessToken, "chat.postEphemeral", {
             channel: meta.channelId,
             user: meta.slackUserId,
             text:
@@ -467,8 +470,8 @@ export async function POST(request: Request) {
         titlePropertyId: meta.titlePropertyId
       });
 
-      if (meta.channelId) {
-        await slackApi("chat.postEphemeral", {
+      if (meta.channelId && installation) {
+        await slackApi(installation.botAccessToken, "chat.postEphemeral", {
           channel: meta.channelId,
           user: meta.slackUserId,
           text:
